@@ -8,14 +8,14 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dece2183/media-winrt-go v0.0.0-20250304161442-46653f733234
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
-	github.com/ebitengine/oto/v3 v3.4.0
+	github.com/ebitengine/oto/v3 v3.5.0
 	github.com/go-ole/go-ole v1.2.6
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gopxl/beep v1.4.1
-	github.com/jfreymuth/pulse v0.1.1
+	github.com/jfreymuth/pulse v0.1.3
 	github.com/nbd-wtf/go-nostr v0.52.3
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sys v0.36.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
@@ -35,7 +35,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/earthboundkid/versioninfo/v2 v2.24.1 // indirect
-	github.com/ebitengine/purego v0.9.0 // indirect
+	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect

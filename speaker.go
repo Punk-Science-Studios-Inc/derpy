@@ -10,9 +10,11 @@ package main
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gopxl/beep"
 	"github.com/jfreymuth/pulse"
+	"github.com/jfreymuth/pulse/proto"
 )
 
 var (
@@ -24,6 +26,7 @@ var (
 	spkStream      *pulse.PlaybackStream
 	spkSampleRate  beep.SampleRate
 	spkBufferSize  int
+	spkMonitorStop chan struct{}
 )
 
 // speakerInit connects to PulseAudio and starts a continuous audio output stream.
@@ -64,6 +67,7 @@ func speakerReopenLocked() error {
 	spkClient = client
 	spkStream = stream
 	spkPlayer = player
+	startRouteMonitorLocked()
 	spkMu.Unlock()
 	return nil
 }
@@ -151,6 +155,78 @@ func speakerEnsureReady() error {
 	return speakerReopenLocked()
 }
 
+func startRouteMonitorLocked() {
+	if spkMonitorStop != nil {
+		return
+	}
+
+	stop := make(chan struct{})
+	spkMonitorStop = stop
+	go monitorRoute(stop)
+}
+
+func monitorRoute(stop <-chan struct{}) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var retryAt time.Time
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if time.Now().Before(retryAt) || speakerRouteHealthy() {
+				continue
+			}
+
+			spkLifecycleMu.Lock()
+			spkMu.Lock()
+			active := spkMonitorStop == stop
+			spkMu.Unlock()
+			if active {
+				_ = speakerReopenLocked()
+				retryAt = time.Now().Add(2 * time.Second)
+			}
+			spkLifecycleMu.Unlock()
+		}
+	}
+}
+
+func speakerRouteHealthy() bool {
+	spkMu.Lock()
+	client := spkClient
+	stream := spkStream
+	player := spkPlayer
+	spkMu.Unlock()
+
+	if player == nil {
+		return true
+	}
+	if client == nil || stream == nil || stream.Closed() || stream.Error() != nil {
+		return false
+	}
+
+	var input proto.GetSinkInputInfoReply
+	if err := client.RawRequest(&proto.GetSinkInputInfo{SinkInputIndex: stream.StreamInputIndex()}, &input); err != nil {
+		return false
+	}
+
+	var sink proto.GetSinkInfoReply
+	if err := client.RawRequest(&proto.GetSinkInfo{SinkIndex: input.SinkIndex}, &sink); err != nil {
+		return false
+	}
+
+	// PulseAudio sink state 3 is SUSPENDED. PipeWire's PulseAudio
+	// compatibility layer reports the same protocol state.
+	return sink.State != 3
+}
+
+func speakerOutputAvailable() bool {
+	spkMu.Lock()
+	defer spkMu.Unlock()
+	return spkClient != nil && spkStream != nil && !spkStream.Closed() && spkStream.Error() == nil
+}
+
 func speakerClose() {
 	spkLifecycleMu.Lock()
 	defer spkLifecycleMu.Unlock()
@@ -159,10 +235,15 @@ func speakerClose() {
 	spkPlayer = nil
 	client := spkClient
 	stream := spkStream
+	monitorStop := spkMonitorStop
 	spkClient = nil
 	spkStream = nil
+	spkMonitorStop = nil
 	spkMu.Unlock()
 
+	if monitorStop != nil {
+		close(monitorStop)
+	}
 	closePulseOutput(client, stream)
 }
 

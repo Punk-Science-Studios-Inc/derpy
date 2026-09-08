@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/gopxl/beep"
 	"github.com/gopxl/beep/flac"
@@ -253,6 +254,35 @@ func TestResumeKeepsPlaybackPausedWhenOutputUnavailable(t *testing.T) {
 	}
 	if !player.ctrl.Paused {
 		t.Fatal("Resume() unpaused playback after output recovery failed")
+	}
+}
+
+func TestPositionFreezesDuringOutputLoss(t *testing.T) {
+	available := true
+	player := &AudioPlayer{
+		ctrl:               &beep.Ctrl{Streamer: &fixedStreamer{remaining: 100}, Paused: false},
+		playing:            true,
+		currentPos:         time.Second,
+		startTime:          time.Now().Add(-100 * time.Millisecond),
+		duration:           time.Minute,
+		outputAvailable:    func() bool { return available },
+		outputClockRunning: true,
+	}
+
+	available = false
+	beforeLoss := player.GetPosition()
+	time.Sleep(10 * time.Millisecond)
+	duringLoss := player.GetPosition()
+	if duringLoss != beforeLoss {
+		t.Fatalf("position advanced during output loss: before=%v during=%v", beforeLoss, duringLoss)
+	}
+
+	available = true
+	player.GetPosition() // Re-anchor the clock at the recovery boundary.
+	time.Sleep(10 * time.Millisecond)
+	afterRecovery := player.GetPosition()
+	if afterRecovery <= duringLoss {
+		t.Fatalf("position did not resume after output recovery: during=%v after=%v", duringLoss, afterRecovery)
 	}
 }
 

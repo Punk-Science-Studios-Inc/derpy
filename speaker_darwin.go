@@ -135,3 +135,9 @@ func speakerClose() {
 		otoPlayer = nil
 	}
 }
+
+func speakerOutputAvailable() bool {
+	spkMu.Lock()
+	defer spkMu.Unlock()
+	return otoPlayer != nil && otoPlayer.Err() == nil
+}

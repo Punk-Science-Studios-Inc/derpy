@@ -83,6 +83,8 @@ type AudioPlayer struct {
 	completionStream   *CompletionStreamer
 	speakerInitialized bool
 	ensureOutputReady  func() error
+	outputAvailable    func() bool
+	outputClockRunning bool
 	scrobbleTracker    *ScrobbleTracker
 	lbClient           *ListenBrainzClient
 }
@@ -91,6 +93,7 @@ type AudioPlayer struct {
 func NewAudioPlayer() *AudioPlayer {
 	return &AudioPlayer{
 		ensureOutputReady: speakerEnsureReady,
+		outputAvailable:   speakerOutputAvailable,
 		lbClient:          NewListenBrainzClient(),
 	}
 }
@@ -239,6 +242,7 @@ func (ap *AudioPlayer) Play() error {
 	// Record start time for position tracking and reset position
 	ap.startTime = time.Now()
 	ap.currentPos = 0
+	ap.outputClockRunning = ap.isOutputAvailable()
 
 	// Start playback
 	speakerPlay(ap.ctrl)
@@ -250,9 +254,10 @@ func (ap *AudioPlayer) Play() error {
 // Pause pauses playback
 func (ap *AudioPlayer) Pause() {
 	if ap.ctrl != nil && ap.playing {
+		outputAvailable := ap.isOutputAvailable()
 		speakerLock()
+		ap.advancePositionLocked(outputAvailable)
 		ap.ctrl.Paused = true
-		ap.currentPos += time.Since(ap.startTime) // Capture position at pause
 		speakerUnlock()
 	}
 }
@@ -282,6 +287,7 @@ func (ap *AudioPlayer) Resume() error {
 	defer speakerUnlock()
 	ap.ctrl.Paused = false
 	ap.startTime = time.Now() // Reset start time on resume
+	ap.outputClockRunning = true
 	return nil
 }
 
@@ -305,13 +311,12 @@ func (ap *AudioPlayer) Stop() {
 		// Wait for speaker to fully stop
 		time.Sleep(20 * time.Millisecond)
 
-		ap.playing = false
-		ap.hasEnded = false
-
-		// Update currentPos to where we stopped
+		// Update currentPos to where we stopped before changing playing state.
 		if ap.ctrl != nil && !ap.ctrl.Paused {
 			ap.currentPos = ap.GetPosition()
 		}
+		ap.playing = false
+		ap.hasEnded = false
 	}
 
 	// Clean up resources
@@ -353,8 +358,10 @@ func (ap *AudioPlayer) GetDuration() time.Duration {
 	return ap.duration
 }
 
-// GetPosition returns the current playback position
+// GetPosition returns the current playback position.
 func (ap *AudioPlayer) GetPosition() time.Duration {
+	outputAvailable := ap.isOutputAvailable()
+
 	speakerLock()
 	defer speakerUnlock()
 
@@ -366,21 +373,39 @@ func (ap *AudioPlayer) GetPosition() time.Duration {
 		return ap.currentPos
 	}
 
-	// Calculate position based on elapsed time since start
-	elapsed := time.Since(ap.startTime)
-	pos := ap.currentPos + elapsed
-
-	// Don't exceed duration
-	if pos > ap.duration {
-		pos = ap.duration
-	}
-
-	// Update ListenBrainz scrobble tracker
-	if ap.scrobbleTracker != nil {
+	pos := ap.advancePositionLocked(outputAvailable)
+	if outputAvailable && ap.scrobbleTracker != nil {
 		ap.scrobbleTracker.Update(pos)
 	}
-
 	return pos
+}
+
+func (ap *AudioPlayer) isOutputAvailable() bool {
+	if ap.outputAvailable != nil {
+		return ap.outputAvailable()
+	}
+	return speakerOutputAvailable()
+}
+
+// advancePositionLocked commits only time during which output was available.
+// The caller must hold the speaker mutex.
+func (ap *AudioPlayer) advancePositionLocked(outputAvailable bool) time.Duration {
+	if ap.outputClockRunning {
+		ap.currentPos += time.Since(ap.startTime)
+		ap.startTime = time.Now()
+	}
+
+	if !outputAvailable {
+		ap.outputClockRunning = false
+	} else if !ap.outputClockRunning {
+		ap.startTime = time.Now()
+		ap.outputClockRunning = true
+	}
+
+	if ap.currentPos > ap.duration {
+		ap.currentPos = ap.duration
+	}
+	return ap.currentPos
 }
 
 // Seek seeks to a specific position in the track
@@ -397,8 +422,16 @@ func (ap *AudioPlayer) Seek(pos time.Duration) error {
 		return fmt.Errorf("failed to seek: %w", err)
 	}
 
+	speakerLock()
 	ap.currentPos = pos
+	ap.startTime = time.Now()
+	ap.outputClockRunning = !ap.ctrlPaused()
+	speakerUnlock()
 	return nil
+}
+
+func (ap *AudioPlayer) ctrlPaused() bool {
+	return ap.ctrl != nil && ap.ctrl.Paused
 }
 
 // IsPlaying returns true if audio is currently playing
