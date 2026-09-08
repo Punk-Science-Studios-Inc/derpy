@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/fs"
 	"syscall"
@@ -213,6 +214,45 @@ func TestIsReadFailureNonEIOErrno(t *testing.T) {
 func TestIsReadFailureNil(t *testing.T) {
 	if isReadFailure(nil) {
 		t.Error("isReadFailure(nil) = true, want false")
+	}
+}
+
+func TestResumeEnsuresOutputBeforeUnpausing(t *testing.T) {
+	player := &AudioPlayer{}
+	player.ctrl = &beep.Ctrl{Streamer: &fixedStreamer{remaining: 10}, Paused: true}
+	player.playing = true
+	called := false
+	player.ensureOutputReady = func() error {
+		called = true
+		if !player.ctrl.Paused {
+			t.Fatal("output readiness was checked after unpausing")
+		}
+		return nil
+	}
+
+	if err := player.Resume(); err != nil {
+		t.Fatalf("Resume() returned unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatal("Resume() did not ensure output readiness")
+	}
+	if player.ctrl.Paused {
+		t.Fatal("Resume() left the controller paused")
+	}
+}
+
+func TestResumeKeepsPlaybackPausedWhenOutputUnavailable(t *testing.T) {
+	player := &AudioPlayer{}
+	player.ctrl = &beep.Ctrl{Streamer: &fixedStreamer{remaining: 10}, Paused: true}
+	player.playing = true
+	wantErr := errors.New("no default audio sink")
+	player.ensureOutputReady = func() error { return wantErr }
+
+	if err := player.Resume(); !errors.Is(err, wantErr) {
+		t.Fatalf("Resume() error = %v, want %v", err, wantErr)
+	}
+	if !player.ctrl.Paused {
+		t.Fatal("Resume() unpaused playback after output recovery failed")
 	}
 }
 

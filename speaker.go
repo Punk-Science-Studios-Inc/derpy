@@ -16,77 +16,154 @@ import (
 )
 
 var (
-	spkMu     sync.Mutex
-	spkBuf    [][2]float64
-	spkPlayer beep.Streamer
-	spkClient *pulse.Client
-	spkStream *pulse.PlaybackStream
+	spkMu          sync.Mutex
+	spkLifecycleMu sync.Mutex
+	spkBuf         [][2]float64
+	spkPlayer      beep.Streamer
+	spkClient      *pulse.Client
+	spkStream      *pulse.PlaybackStream
+	spkSampleRate  beep.SampleRate
+	spkBufferSize  int
 )
 
 // speakerInit connects to PulseAudio and starts a continuous audio output stream.
-// It is safe to call only once per application lifecycle; subsequent calls are
-// guarded by the speakerInitialized flag in AudioPlayer.
+// The stream can later be replaced by speakerEnsureReady when the output route
+// changes.
 func speakerInit(sampleRate beep.SampleRate, bufferSize int) error {
-	// Allocate the conversion buffer before starting the stream so the
-	// callback goroutine sees a valid slice immediately after Start().
-	spkBuf = make([][2]float64, bufferSize)
+	spkLifecycleMu.Lock()
+	defer spkLifecycleMu.Unlock()
 
-	var err error
-	spkClient, err = pulse.NewClient(
-		pulse.ClientApplicationName("derpy"),
-	)
+	spkSampleRate = sampleRate
+	spkBufferSize = bufferSize
+	return speakerReopenLocked()
+}
+
+// speakerReopenLocked replaces the PulseAudio stream without touching the
+// decoded player. The caller must hold spkLifecycleMu.
+func speakerReopenLocked() error {
+	spkMu.Lock()
+	player := spkPlayer
+	spkPlayer = nil
+	oldClient := spkClient
+	oldStream := spkStream
+	spkClient = nil
+	spkStream = nil
+	spkMu.Unlock()
+
+	closePulseOutput(oldClient, oldStream)
+
+	client, stream, err := newPulseOutput(spkSampleRate, spkBufferSize)
 	if err != nil {
-		return fmt.Errorf("failed to connect to PulseAudio: %w", err)
+		spkMu.Lock()
+		spkPlayer = player
+		spkMu.Unlock()
+		return err
 	}
 
-	spkStream, err = spkClient.NewPlayback(
-		pulse.Float32Reader(func(out []float32) (int, error) {
-			// This callback runs on a goroutine owned by the pulse library.
-			// spkMu serialises access to spkBuf and spkPlayer with the main thread.
-			spkMu.Lock()
-			defer spkMu.Unlock()
+	spkMu.Lock()
+	spkClient = client
+	spkStream = stream
+	spkPlayer = player
+	spkMu.Unlock()
+	return nil
+}
 
-			numFrames := len(out) / 2
-			if numFrames > len(spkBuf) {
-				spkBuf = make([][2]float64, numFrames)
-			}
+func newPulseOutput(sampleRate beep.SampleRate, bufferSize int) (*pulse.Client, *pulse.PlaybackStream, error) {
+	client, err := pulse.NewClient(pulse.ClientApplicationName("derpy"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to connect to PulseAudio: %w", err)
+	}
 
-			if spkPlayer == nil {
-				// No active player — output silence so the stream stays open.
-				for i := range out {
-					out[i] = 0
-				}
-				return len(out), nil
-			}
+	// Fail before creating a stream when the audio server has no current
+	// default sink. The caller can retry without consuming the track.
+	if _, err := client.DefaultSink(); err != nil {
+		client.Close()
+		return nil, nil, fmt.Errorf("no default audio sink: %w", err)
+	}
 
-			n, ok := spkPlayer.Stream(spkBuf[:numFrames])
-			if !ok {
-				spkPlayer = nil
-			}
+	spkMu.Lock()
+	spkBuf = make([][2]float64, bufferSize)
+	spkMu.Unlock()
 
-			// Convert float64 stereo to interleaved float32 (L, R, L, R, …).
-			for i := 0; i < n; i++ {
-				out[i*2] = float32(spkBuf[i][0])
-				out[i*2+1] = float32(spkBuf[i][1])
-			}
-			// Fill any remaining frames with silence.
-			for i := n * 2; i < len(out); i++ {
-				out[i] = 0
-			}
-			return len(out), nil
-		}),
+	stream, err := client.NewPlayback(
+		pulse.Float32Reader(speakerRead),
 		pulse.PlaybackStereo,
 		pulse.PlaybackSampleRate(int(sampleRate)),
 		pulse.PlaybackLatency(0.1),
 	)
 	if err != nil {
-		spkClient.Close()
-		spkClient = nil
-		return fmt.Errorf("failed to create PulseAudio playback stream: %w", err)
+		client.Close()
+		return nil, nil, fmt.Errorf("failed to create PulseAudio playback stream: %w", err)
 	}
 
-	spkStream.Start()
-	return nil
+	stream.Start()
+	return client, stream, nil
+}
+
+func speakerRead(out []float32) (int, error) {
+	spkMu.Lock()
+	defer spkMu.Unlock()
+
+	numFrames := len(out) / 2
+	if numFrames > len(spkBuf) {
+		spkBuf = make([][2]float64, numFrames)
+	}
+
+	if spkPlayer == nil {
+		for i := range out {
+			out[i] = 0
+		}
+		return len(out), nil
+	}
+
+	n, ok := spkPlayer.Stream(spkBuf[:numFrames])
+	if !ok {
+		spkPlayer = nil
+	}
+
+	for i := 0; i < n; i++ {
+		out[i*2] = float32(spkBuf[i][0])
+		out[i*2+1] = float32(spkBuf[i][1])
+	}
+	for i := n * 2; i < len(out); i++ {
+		out[i] = 0
+	}
+	return len(out), nil
+}
+
+func closePulseOutput(client *pulse.Client, stream *pulse.PlaybackStream) {
+	if stream != nil {
+		stream.Stop()
+		stream.Close()
+	}
+	if client != nil {
+		client.Close()
+	}
+}
+
+// speakerEnsureReady reopens the output stream on the current default route.
+// Reopening on every resume is deliberate: the Pulse client does not expose
+// route-loss events, and a stream can remain apparently open after its sink
+// disappears.
+func speakerEnsureReady() error {
+	spkLifecycleMu.Lock()
+	defer spkLifecycleMu.Unlock()
+	return speakerReopenLocked()
+}
+
+func speakerClose() {
+	spkLifecycleMu.Lock()
+	defer spkLifecycleMu.Unlock()
+
+	spkMu.Lock()
+	spkPlayer = nil
+	client := spkClient
+	stream := spkStream
+	spkClient = nil
+	spkStream = nil
+	spkMu.Unlock()
+
+	closePulseOutput(client, stream)
 }
 
 // speakerPlay sets the active streamer. The pulse callback will begin pulling

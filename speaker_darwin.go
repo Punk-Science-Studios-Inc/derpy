@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -112,4 +113,25 @@ func speakerLock() {
 
 func speakerUnlock() {
 	spkMu.Unlock()
+}
+
+// speakerEnsureReady verifies the native output reader before resuming. The
+// macOS backend owns device recovery, so there is no Pulse stream to rebind.
+func speakerEnsureReady() error {
+	spkMu.Lock()
+	defer spkMu.Unlock()
+	if otoPlayer == nil {
+		return fmt.Errorf("audio output is not initialized")
+	}
+	return otoPlayer.Err()
+}
+
+func speakerClose() {
+	spkMu.Lock()
+	defer spkMu.Unlock()
+	spkPlayer = nil
+	if otoPlayer != nil {
+		_ = otoPlayer.Close()
+		otoPlayer = nil
+	}
 }

@@ -416,7 +416,10 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle pause/play
 			if m.playing {
 				if m.paused {
-					m.player.Resume()
+					if err := m.player.Resume(); err != nil {
+						m.err = err
+						return m, nil
+					}
 					m.paused = false
 					m.mpris.NotifyStateChanged(m)
 					// Restart ticking when resuming
@@ -529,7 +532,10 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mprisPlayMsg:
 		if m.playing && m.paused {
 			// Resume from pause.
-			m.player.Resume()
+			if err := m.player.Resume(); err != nil {
+				m.err = err
+				return m, nil
+			}
 			m.paused = false
 			m.mpris.NotifyStateChanged(m)
 			return m, m.tickCmd()
@@ -548,7 +554,10 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mprisPlayPauseMsg:
 		if m.playing {
 			if m.paused {
-				m.player.Resume()
+				if err := m.player.Resume(); err != nil {
+					m.err = err
+					return m, nil
+				}
 				m.paused = false
 				m.mpris.NotifyStateChanged(m)
 				return m, m.tickCmd()

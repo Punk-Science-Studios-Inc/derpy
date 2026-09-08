@@ -82,6 +82,7 @@ type AudioPlayer struct {
 	hasEnded           bool
 	completionStream   *CompletionStreamer
 	speakerInitialized bool
+	ensureOutputReady  func() error
 	scrobbleTracker    *ScrobbleTracker
 	lbClient           *ListenBrainzClient
 }
@@ -89,7 +90,8 @@ type AudioPlayer struct {
 // NewAudioPlayer creates a new audio player instance
 func NewAudioPlayer() *AudioPlayer {
 	return &AudioPlayer{
-		lbClient: NewListenBrainzClient(),
+		ensureOutputReady: speakerEnsureReady,
+		lbClient:          NewListenBrainzClient(),
 	}
 }
 
@@ -255,14 +257,32 @@ func (ap *AudioPlayer) Pause() {
 	}
 }
 
-// Resume resumes playback
-func (ap *AudioPlayer) Resume() {
-	if ap.ctrl != nil && ap.playing {
-		speakerLock()
-		ap.ctrl.Paused = false
-		ap.startTime = time.Now() // Reset start time on resume
-		speakerUnlock()
+// Resume resumes playback after ensuring that the output route is ready.
+func (ap *AudioPlayer) Resume() error {
+	if ap.ctrl == nil || !ap.playing {
+		return nil
 	}
+
+	speakerLock()
+	paused := ap.ctrl.Paused
+	speakerUnlock()
+	if !paused {
+		return nil
+	}
+
+	ensureOutputReady := ap.ensureOutputReady
+	if ensureOutputReady == nil {
+		ensureOutputReady = speakerEnsureReady
+	}
+	if err := ensureOutputReady(); err != nil {
+		return fmt.Errorf("failed to restore audio output: %w", err)
+	}
+
+	speakerLock()
+	defer speakerUnlock()
+	ap.ctrl.Paused = false
+	ap.startTime = time.Now() // Reset start time on resume
+	return nil
 }
 
 // IsPaused returns true if playback is paused
@@ -316,8 +336,8 @@ func (ap *AudioPlayer) Stop() {
 func (ap *AudioPlayer) Close() {
 	ap.Stop()
 
-	// Final cleanup - clear speaker one last time
-	speakerClear()
+	// Final cleanup - release the output stream and client.
+	speakerClose()
 
 	// Reset speaker initialization flag if needed for restart
 	ap.speakerInitialized = false
