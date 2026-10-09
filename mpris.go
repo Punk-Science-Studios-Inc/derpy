@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -453,10 +454,22 @@ func metadataFromSnap(snap mprisStateSnapshot) map[string]dbus.Variant {
 	return map[string]dbus.Variant{
 		"mpris:trackid": dbus.MakeVariant(trackId),
 		"mpris:length":  dbus.MakeVariant(snap.duration.Microseconds()),
+		"xesam:url":     dbus.MakeVariant(fileUri(snap.trackPath)),
 		"xesam:title":   dbus.MakeVariant(title),
 		"xesam:artist":  dbus.MakeVariant([]string{artist}),
 		"xesam:album":   dbus.MakeVariant(album),
 	}
+}
+
+
+// fileUri renders an absolute track path as a file:// URI with the path
+// percent-encoded, the shape MPRIS xesam:url expects. Empty paths stay
+// empty so clients can tell "no file" from a malformed one.
+func fileUri(path string) string {
+	if path == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
 // basenameWithoutExt returns the filename component of a path, with its
