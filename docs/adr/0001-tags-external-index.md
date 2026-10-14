@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded. Tag support was removed from derpy on 2026-10-14. It may return once Tags can be stored in, and searched from, the audio files themselves.
 
 ## Context
 

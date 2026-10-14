@@ -53,29 +53,4 @@ var (
 	psNostr = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#7A8800")). // PS Olive
 		MarginTop(1)
-
-	// psIndexer — PS Dark Grey: background-sweep status, low priority.
-	psIndexer = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#3A3A3A")). // PS Dark Grey
-		MarginTop(1)
-
-	// psTagHeader — PS Dark Grey bold: right-column "tags" header.
-	psTagHeader = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#3A3A3A")). // PS Dark Grey
-		Bold(true)
-
-	// psTag — PS Dark Grey: individual tag strings in the right column.
-	psTag = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#3A3A3A")) // PS Dark Grey
-
-	// psDotLime / psDotOlive / psDotDarkOlive — the three PS brand greens
-	// for the indexer spinner, applied per-dot so frame rotation is cheap.
-	psDotLime = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#C8DF00")) // PS Lime
-
-	psDotOlive = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7A8800")) // PS Olive
-
-	psDotDarkOlive = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#454E00")) // PS Dark Olive
 )

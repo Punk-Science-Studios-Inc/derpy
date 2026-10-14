@@ -63,22 +63,12 @@ func isPhraseArg(s string) bool {
 	return true
 }
 
-// tagsFlag returns the --tags persistent-flag value from anywhere in the
-// command tree. Subcommands use this to opt in to the Tag pre-filter
-// without each needing to define the flag locally.
-func tagsFlag(cmd *cobra.Command) string {
-	if f := cmd.Flag("tags"); f != nil {
-		return f.Value.String()
-	}
-	return ""
-}
 
 // rootCmd builds the top-level Cobra command for derpy.
 func rootCmd() *cobra.Command {
 	var noTUI bool
 	var source string
 	var setDefaultSource string
-	var tagsFilter string
 
 	cmd := &cobra.Command{
 		Use:   "derpy [--source <dir>] [--set-default-source <dir>] [expression...]",
@@ -132,18 +122,13 @@ Matching is case-insensitive against the full file path.`,
 				return fmt.Errorf("no source directory specified — use --source <dir> or set a default with --set-default-source <dir>")
 			}
 
-			return runPlayer(musicDir, argsToExpr(args), tagsFilter, noTUI)
+			return runPlayer(musicDir, argsToExpr(args), noTUI)
 		},
 	}
 
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Play without the terminal UI")
 	cmd.Flags().StringVar(&source, "source", "", "Directory to scan for audio files")
 	cmd.Flags().StringVar(&setDefaultSource, "set-default-source", "", "Save a default source directory to the config and exit")
-	// --tags is a persistent flag so it composes with subcommands like
-	// `earmarks` and `list`. Comma-separated; OR semantics across the list.
-	// The raw value is normalized at filter time, so the user can pass
-	// whatever they typed during tagging.
-	cmd.PersistentFlags().StringVar(&tagsFilter, "tags", "", "Filter to tracks tagged with any of these (comma-separated)")
 
 	// Subcommands
 	cmd.AddCommand(versionCmd())
@@ -316,10 +301,9 @@ Pass empty strings to clear the saved credentials:
 	}
 }
 
-// runPlayer scans the directory, optionally filters by a keyword expression
-// and/or a Tag pre-filter, shuffles, and starts playback. exprStr and
-// tagsFilter may both be empty to play everything.
-func runPlayer(musicDir string, exprStr string, tagsFilter string, noTUI bool) error {
+// runPlayer scans the directory, optionally filters by a keyword expression,
+// shuffles, and starts playback. exprStr may be empty to play everything.
+func runPlayer(musicDir string, exprStr string, noTUI bool) error {
 	if _, err := os.Stat(musicDir); os.IsNotExist(err) {
 		return fmt.Errorf("directory does not exist: %s", musicDir)
 	}
@@ -338,14 +322,6 @@ func runPlayer(musicDir string, exprStr string, tagsFilter string, noTUI bool) e
 		return fmt.Errorf("no audio files found in directory: %s", musicDir)
 	}
 
-	// Apply --tags pre-filter if requested. Composes with the path
-	// expression filter — both must pass.
-	if tagsFilter != "" {
-		playlist = FilterPlaylistByTagsFromDisk(playlist, tagsFilter)
-		if len(playlist) == 0 {
-			return fmt.Errorf("no tracks matching --tags %q (tags applied only to Tracks derpy has played at least once)", tagsFilter)
-		}
-	}
 
 	// Always shuffle by default
 	shufflePlaylist(playlist)
@@ -353,7 +329,7 @@ func runPlayer(musicDir string, exprStr string, tagsFilter string, noTUI bool) e
 	if noTUI {
 		return runNoTUI(playlist)
 	}
-	return runTUI(playlist, musicDir)
+	return runTUI(playlist)
 }
 
 // runNoTUI plays the playlist sequentially without a terminal UI.
@@ -390,13 +366,7 @@ func runNoTUI(playlist []string) error {
 // runTUI starts the Bubble Tea TUI player and, if the session D-Bus is
 // available, registers an MPRIS2 service so external clients (playerctl,
 // Waybar, etc.) can query and control playback.
-//
-// When sourceDir is non-empty, a background SumCache indexer is also
-// kicked off: it walks the directory and hashes any audio files not yet
-// in cache, reporting progress to the TUI via indexProgressMsg. Playback
-// is never blocked on this — the indexer runs in its own goroutine and
-// the context is cancelled when the user quits.
-func runTUI(playlist []string, sourceDir string) error {
+func runTUI(playlist []string) error {
 	model := NewPlayerModel(playlist)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
@@ -410,17 +380,6 @@ func runTUI(playlist []string, sourceDir string) error {
 	// Give the model a reference so it can emit state-change signals.
 	model.mpris = mpris
 	defer mpris.Close()
-
-	// Background SumCache indexer. Only runs when a source directory is
-	// known (i.e. default play mode); the earmarks subcommand passes
-	// sourceDir="" because its playlist isn't tied to a scanned dir.
-	if sourceDir != "" {
-		indexerCtx, cancelIndexer := context.WithCancel(context.Background())
-		defer cancelIndexer()
-		go IndexSource(indexerCtx, sourceDir, model.sumCache, func(done, total int) {
-			program.Send(indexProgressMsg{done: done, total: total})
-		})
-	}
 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running TUI: %w", err)
@@ -502,33 +461,6 @@ Requires a Nostr private key saved via 'derpy nostr-key <key>'.`,
 				return nil
 			}
 
-			// Apply --tags pre-filter against the earmark Paths. Earmarks
-			// whose file does not exist locally (Blossom-only) cannot be
-			// tag-matched here — they're filtered out silently.
-			if t := tagsFlag(cmd); t != "" {
-				paths := make([]string, 0, len(earmarks))
-				for _, e := range earmarks {
-					if e.Path != "" {
-						paths = append(paths, e.Path)
-					}
-				}
-				matched := FilterPlaylistByTagsFromDisk(paths, t)
-				allow := make(map[string]bool, len(matched))
-				for _, p := range matched {
-					allow[p] = true
-				}
-				filtered := earmarks[:0]
-				for _, e := range earmarks {
-					if allow[e.Path] {
-						filtered = append(filtered, e)
-					}
-				}
-				earmarks = filtered
-				if len(earmarks) == 0 {
-					fmt.Fprintf(cmd.OutOrStdout(), "No earmarks match --tags %q.\n", t)
-					return nil
-				}
-			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "\n%d earmark(s):\n\n", len(earmarks))
 			for i, e := range earmarks {
@@ -962,22 +894,11 @@ Requires a Nostr private key saved via 'derpy nostr-key <key>'.`,
 				fmt.Fprintf(cmd.OutOrStdout(), "Playing %d track(s), %d skipped.\n\n", len(finalPlaylist), skipped)
 			}
 
-			// Apply --tags pre-filter if the user set the root-level flag.
-			// Narrows the earmarks set down to those whose Track is tagged
-			// with at least one of the requested Tags.
-			if t := tagsFlag(cmd); t != "" {
-				finalPlaylist = FilterPlaylistByTagsFromDisk(finalPlaylist, t)
-				if len(finalPlaylist) == 0 {
-					return fmt.Errorf("no earmarks match --tags %q", t)
-				}
-			}
 
 			if noTUI {
 				return runNoTUI(finalPlaylist)
 			}
-			// Empty sourceDir — earmarks playlist isn't tied to a scanned
-			// directory, so the background indexer isn't applicable here.
-			return runTUI(finalPlaylist, "")
+			return runTUI(finalPlaylist)
 		},
 	}
 

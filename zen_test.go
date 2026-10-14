@@ -3,7 +3,7 @@ package main
 // zen_test.go — tests for the Zen presentation (see zen.go).
 //
 // Contract under test: playback is a centered column (hero, album whisper,
-// hairline progress, position/tags whisper, hint); lines with nothing to
+// hairline progress, position whisper, hint); lines with nothing to
 // show collapse without leaving blanks; every overlay borrows the column.
 
 import (
@@ -54,12 +54,11 @@ func TestZenHomeCollapsesAlbumWhenMissing(t *testing.T) {
 	}
 }
 
-// TestZenWhisperCollapsesWithoutTags verifies the agreed behaviour: no tags
-// means the whisper is just the position — no dangling separator, no extra
-// line.
-func TestZenWhisperCollapsesWithoutTags(t *testing.T) {
+// TestZenWhisperShowsPosition verifies the whisper is just the playlist
+// position — no dangling separator.
+func TestZenWhisperShowsPosition(t *testing.T) {
 	m := NewPlayerModel([]string{"a.flac", "b.flac"})
-	m.Update(trackLoadedMsg{sum: "s1", tags: nil, title: "X", artist: "Y"})
+	m.Update(trackLoadedMsg{title: "X", artist: "Y"})
 	m.currentIndex = 1
 
 	got := m.zenWhisper()
@@ -67,7 +66,7 @@ func TestZenWhisperCollapsesWithoutTags(t *testing.T) {
 		t.Errorf("zenWhisper should carry the position, got %q", got)
 	}
 	if strings.Contains(got, "·") {
-		t.Errorf("untagged zenWhisper should have no separator, got %q", got)
+		t.Errorf("zenWhisper should have no separator, got %q", got)
 	}
 }
 
@@ -141,23 +140,5 @@ func TestZenTransientHiddenWhenIdle(t *testing.T) {
 	m := NewPlayerModel([]string{"a.flac"})
 	if got := m.zenTransient(); got != "" {
 		t.Errorf("zenTransient = %q, want empty when idle", got)
-	}
-}
-
-// TestZenTagEntryShowsCurrentTags verifies the editor keeps the existing set
-// visible ("now: …") while the buffer holds the draft.
-func TestZenTagEntryShowsCurrentTags(t *testing.T) {
-	m := NewPlayerModel([]string{"a.flac"})
-	m.Update(trackLoadedMsg{sum: "sumA", tags: []string{"jazz"}})
-	m.playing = true
-	m.Update(keyMsg("t"))
-	m.tagBuffer = "dnb"
-
-	out := m.View()
-	if !strings.Contains(out, "dnb") {
-		t.Errorf("tag editor should echo the draft buffer: %q", out)
-	}
-	if !strings.Contains(out, "jazz") {
-		t.Errorf("tag editor should keep the current set visible: %q", out)
 	}
 }

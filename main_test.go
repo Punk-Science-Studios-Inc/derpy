@@ -182,7 +182,7 @@ func TestRunPlayerPrintsStartupScanFeedback(t *testing.T) {
 	}
 	os.Stdout = w
 
-	runErr := runPlayer(tmpDir, "", "", true)
+	runErr := runPlayer(tmpDir, "", true)
 
 	_ = w.Close()
 	os.Stdout = origStdout

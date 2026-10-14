@@ -39,16 +39,14 @@ The core reads no config files. `configureCore()` in `config.go` pushes derpy's 
 | `mpris.go` / `mpris_windows.go` / `mpris_darwin.go` | OS media-control integration behind one `MPRISService` API (build-tagged per OS). Linux = MPRIS2 D-Bus (`mpris.go`); Windows = System Media Transport Controls via a WinRT MediaPlayer-owned SMTC (`mpris_windows.go`); macOS = no-op stub. `mpris_types.go` holds the platform-neutral `mprisXxxMsg` command messages consumed by `model.go`. |
 | `listenbrainz.go` | Optional scrobbling — submits "playing now" immediately, scrobbles at 25% completion (min 30s tracks) |
 | `shuffle.go` | Fisher-Yates shuffle seeded with current time |
-| `tags.go` | **Tag** index (`~/.config/derpy/tags.json`) + `NormalizeTags` (lowercase, `[a-z0-9 ]` only) + `filterPlaylistByTags` (the `--tags` CLI pre-filter) |
-| `sumcache.go` | **Sum cache** (`~/.config/derpy/sum-cache.json`): mtime+size-validated path → `tag.Sum` mapping. The bridge between file-system paths and the Tag index. |
-| `indexer.go` | Background `SumCache` indexer. Walks the source dir at TUI startup, hashes any uncached audio files, reports progress via `indexProgressMsg`. Playback is never blocked. |
+
 
 **Audio formats:** mp3, wav, flac, ogg, m4a, aac
-**Key libraries:** `charmbracelet/bubbletea`, `gopxl/beep`, `dhowden/tag` (metadata + audio fingerprint via `tag.Sum`), `hirigaray/go-listenbrainz`
+**Key libraries:** `charmbracelet/bubbletea`, `gopxl/beep`, `dhowden/tag` (metadata), `hirigaray/go-listenbrainz`
 
-**TUI:** 100ms tick interval for progress updates. Position is calculated from elapsed wall-clock time with pause offset. Right-edge **Tag** column appears when the current Track has Tags and terminal width ≥ 60.
+**TUI:** 100ms tick interval for progress updates. Position is calculated from elapsed wall-clock time with pause offset.
 
-**Keyboard controls:** `←`/`→` prev/next track, `SPACE` pause/resume, `[E]` earmark, `[C]` channels, `[P]` post, `[T]` tag, `[D]` delete, `ESC`/`q` quit.
+**Keyboard controls:** `←`/`→` prev/next track, `SPACE` pause/resume, `[E]` earmark, `[C]` channels, `[P]` post, `[D]` delete, `ESC`/`q` quit.
 
 ### Channels
 
@@ -59,7 +57,7 @@ A channel is a room of Nostr identities sharing earmarks. The full contract is t
 - **Posting shares nothing new.** The post hands members the existing chunk hashes and file key, so it costs one small event per member and zero bytes.
 - **There is no backfill**, and the empty-feed message says so. A newly joined channel being empty is correct, not broken.
 
-**Tag and Sum architecture:** See `CONTEXT.md` for the glossary (Track, Tag, Sum, Sum cache, Tag index) and `docs/adr/0001-tags-external-index.md` for why Tags live in a derpy-side index keyed by `tag.Sum` rather than being written into the audio file's ID3v2/Vorbis Comments.
+**Tags:** Removed. `docs/adr/0001-tags-external-index.md` records the old external-index design (superseded). Tags may return only if they can be stored in, and searched from, the audio files themselves.
 
 ## Development Directives
 

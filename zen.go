@@ -3,15 +3,14 @@ package main
 // zen.go — the Zen presentation of the derpy TUI.
 //
 // One room, many visitors: playback is a centered column (hero line, album
-// whisper, hairline progress, position/tags whisper, hint); every overlay —
-// key entry, channel feed, earmark picker, tag editor, help — borrows that
+// whisper, hairline progress, position whisper, hint); every overlay —
+// key entry, channel feed, earmark picker, help — borrows that
 // same column inside a hairline card and gives it back. Transient system
-// state (Nostr receipts, the background Sum-indexer) is a single muted line
+// state (Nostr receipts) is a single muted line
 // that appears only while it has something to say.
 //
 // Collapsing rule: a line with nothing to show leaves no blank behind. No
-// album → no album line. No tags → the whisper is just "X / N". No transient
-// state → no transient line.
+// album → no album line. No transient state → no transient line.
 
 import (
 	"fmt"
@@ -99,24 +98,17 @@ func (m *PlayerModel) zenProgressLine() string {
 		times)
 }
 
-// zenWhisper renders the position/tags line. Tags collapse entirely when the
-// track has none: "3 / 12", never "3 / 12 · ".
+// zenWhisper renders the playlist position line: "3 / 12".
 func (m *PlayerModel) zenWhisper() string {
 	whisper := fmt.Sprintf("%d / %d", m.currentIndex+1, len(m.playlist))
-	if len(m.currentTags) > 0 {
-		whisper += " · " + strings.Join(m.currentTags, " · ")
-	}
 	return strings.TrimSpace(psStatus.Render(whisper))
 }
 
-// zenTransient renders the single system line — Nostr receipt first, indexer
-// second — or "" when neither has anything to say.
+// zenTransient renders the single system line — the Nostr receipt — or ""
+// when there is nothing to say.
 func (m *PlayerModel) zenTransient() string {
 	if m.nostrStatus != "" {
 		return strings.TrimSpace(psNostr.Render(m.nostrStatus))
-	}
-	if m.indexingTotal > 0 && m.indexingDone < m.indexingTotal {
-		return strings.TrimSpace(m.renderIndexerSpinner())
 	}
 	return ""
 }
@@ -177,7 +169,7 @@ func zenHelpRows() []string {
 		"e            earmark this track",
 		"c            browse channel feed",
 		"p            post to nostr + bluesky",
-		"t            edit tags",
+
 		"d            delete file from disk",
 		"? / esc      close this card",
 		"q            quit",
@@ -185,7 +177,7 @@ func zenHelpRows() []string {
 }
 
 // View renders the Zen TUI. Overlay precedence mirrors the old view:
-// key entry, channel feed, picker, help, tag editor, then home.
+// key entry, channel feed, picker, help, then home.
 func (m *PlayerModel) View() string {
 	if m.err != nil {
 		return zenCenter(m.width, fmt.Sprintf("error: %v\nq or esc to quit", m.err))
@@ -299,17 +291,6 @@ func (m *PlayerModel) View() string {
 		return zenCenter(m.width, context) + "\n" + m.zenCard("keys", zenHelpRows(), "? / esc close")
 	}
 
-	// Tag-entry overlay. The current set stays visible ("now: …") — you're
-	// editing what's there, so better to see it.
-	if m.tagEntry {
-		rows := []string{fmt.Sprintf("> %s", m.tagBuffer)}
-		if len(m.currentTags) > 0 {
-			rows = append(rows, psStatus.Render("now: "+strings.Join(m.currentTags, ", ")))
-		}
-		rows = append(rows, psStatus.Render("comma-separated · kept as [a-z0-9 ]"))
-		return zenCenter(m.width, context) + "\n" + m.zenCard("tags for this track.",
-			rows, "enter save · esc cancel")
-	}
 
 	return m.zenHome("space · ← → · e · ?")
 }
