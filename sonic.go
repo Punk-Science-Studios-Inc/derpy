@@ -19,9 +19,10 @@ func sonicCmd() *cobra.Command {
 	var noTUI bool
 	var server string
 	var user string
+	var favourites bool
 
 	cmd := &cobra.Command{
-		Use:   "sonic [--server <url>] [--user <name>] [expression...]",
+		Use:   "sonic [--server <url>] [--user <name>] [--favourites] [expression...]",
 		Short: "Shuffle and play music from a Subsonic server",
 		Long: `Play the library of a Subsonic-compatible server (Navidrome, Gonic,
 Airsonic, ...) shuffled, exactly like derpy plays a local directory.
@@ -36,6 +37,10 @@ Keyword expressions work as they do for local playback, matched against the
 server's file path for each song (or "artist/album/title" when the server
 does not report paths):
   derpy sonic jazz AND piano
+
+Press [F] while a server track plays to add it to or remove it from your
+favourites (shown with a ♥). --favourites plays only your favourites:
+  derpy sonic --favourites
 
 Tracks are downloaded one at a time as they play and deleted afterwards.
 Formats derpy cannot decode are transcoded to mp3 by the server. [D] does
@@ -83,13 +88,25 @@ nothing for server tracks.`,
 				subsonicSession = nil
 			}()
 
-			fmt.Fprintln(cmd.OutOrStdout(), "Fetching library...")
-			songs, err := client.Songs(func(n int) {
-				fmt.Fprintf(cmd.OutOrStdout(), "\r  %d song(s)", n)
-			})
-			fmt.Fprintln(cmd.OutOrStdout())
-			if err != nil {
-				return fmt.Errorf("could not fetch library: %w", err)
+			var songs []subsonicSong
+			if favourites {
+				fmt.Fprintln(cmd.OutOrStdout(), "Fetching favourites...")
+				songs, err = client.Favourites()
+				if err != nil {
+					return fmt.Errorf("could not fetch favourites: %w", err)
+				}
+				if len(songs) == 0 {
+					return fmt.Errorf("no favourites on %s yet — press [F] while a track plays to add one", client.baseURL)
+				}
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "Fetching library...")
+				songs, err = client.Songs(func(n int) {
+					fmt.Fprintf(cmd.OutOrStdout(), "\r  %d song(s)", n)
+				})
+				fmt.Fprintln(cmd.OutOrStdout())
+				if err != nil {
+					return fmt.Errorf("could not fetch library: %w", err)
+				}
 			}
 
 			exprStr := argsToExpr(args)
@@ -117,6 +134,7 @@ nothing for server tracks.`,
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Play without the terminal UI")
 	cmd.Flags().StringVar(&server, "server", "", "Subsonic server URL (saved for future runs)")
 	cmd.Flags().StringVar(&user, "user", "", "Subsonic username (saved for future runs)")
+	cmd.Flags().BoolVar(&favourites, "favourites", false, "Play only your favourite tracks")
 	return cmd
 }
 

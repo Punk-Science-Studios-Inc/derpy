@@ -20,6 +20,7 @@ Earmarks expire after 30 days. This is intentional. The list isn't a permanent a
 - `[P]` publishes a public Nostr note and a Bluesky note about what you're listening to, with a Bandcamp or YouTube link if one can be found
 - `[D]` deletes the current file from disk
 - `derpy sonic` shuffles and plays the library of a Subsonic-compatible server (Navidrome, Gonic, Airsonic) instead of a local directory
+- `[F]` adds the current Sonic track to your server favourites, or removes it (shown with a ♥); `derpy sonic --favourites` plays only your favourites
 - `derpy earmarks` plays your earmarked tracks as a playlist — using the local file if it exists, downloading and decrypting from Blossom if not
 - Earmarks older than 30 days are automatically purged on startup, along with their uploaded audio chunks
 
@@ -103,6 +104,7 @@ derpy (jazz OR blues) AND live
 # password, checks them, and saves them for later runs.
 derpy sonic
 derpy sonic jazz AND piano
+derpy sonic --favourites                                   # only your favourites
 derpy sonic --server https://music.example.com --user me   # switch server/account
 
 # Play your earmarked tracks
@@ -122,6 +124,7 @@ derpy list
 | `E` | Earmark current track |
 | `P` | Post to Nostr |
 | `D` | Delete current file from disk |
+| `F` | Add/remove the current Sonic track from your favourites |
 | `ESC` / `q` | Quit |
 
 ## Nostr setup

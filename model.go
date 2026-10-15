@@ -71,6 +71,7 @@ type PlayerModel struct {
 	// it rather than queueing behind it. loadMu keeps two loads from driving
 	// the player at once; trackLoadedMsg results from older loads are dropped.
 	loading    bool
+	favourite  bool // current Subsonic track is a favourite; always false for local files
 	loadSeq    int
 	loadCancel context.CancelFunc
 	loadMu     sync.Mutex
@@ -146,6 +147,13 @@ type cleanupMsg struct {
 
 type trackDeletedMsg struct {
 	err error
+}
+
+// favouriteMsg is sent after a favourite toggle on the Subsonic server.
+type favouriteMsg struct {
+	id        string
+	favourite bool
+	err       error
 }
 
 // NewPlayerModel creates a new player model.
@@ -441,6 +449,17 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, m.deleteCurrentTrack()
 			}
+
+		case "f":
+			// Toggle the current Subsonic track as a favourite on the server.
+			if m.playing && m.currentIndex < len(m.playlist) {
+				id, remote := subsonicEntryID(m.playlist[m.currentIndex])
+				if !remote || subsonicSession == nil {
+					m.nostrStatus = "Favourites are only available for Sonic tracks"
+					return m, nil
+				}
+				return m, m.toggleFavouriteCmd(id, !m.favourite)
+			}
 		}
 
 	// ---- MPRIS2 command messages injected by MPRISService -------------------
@@ -569,6 +588,10 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // superseded by a later skip
 		}
 		m.loading = false
+		m.favourite = false
+		if id, ok := subsonicEntryID(m.playlist[m.currentIndex]); ok && subsonicSession != nil {
+			m.favourite = subsonicSession.IsFavourite(id)
+		}
 		m.loadFailures = 0 // A track loaded — reset the consecutive-failure guard.
 		m.playing = true
 		m.paused = false
@@ -587,6 +610,22 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Restart the tick cycle for position updates
 		return m, m.tickCmd()
+
+	case favouriteMsg:
+		if msg.err != nil {
+			m.nostrStatus = "Favourite failed: " + msg.err.Error()
+			return m, nil
+		}
+		// Only reflect the change if the user hasn't moved on to another track.
+		if id, ok := subsonicEntryID(m.playlist[m.currentIndex]); ok && id == msg.id {
+			m.favourite = msg.favourite
+		}
+		if msg.favourite {
+			m.nostrStatus = "♥ Added to favourites"
+		} else {
+			m.nostrStatus = "Removed from favourites"
+		}
+		return m, nil
 
 	case trackDeletedMsg:
 		if msg.err != nil {
@@ -1189,6 +1228,15 @@ func (m *PlayerModel) deleteCurrentTrack() tea.Cmd {
 			return trackDeletedMsg{err: fmt.Errorf("delete failed: %w", err)}
 		}
 		return trackDeletedMsg{}
+	}
+}
+
+// toggleFavouriteCmd sets a Subsonic track's favourite state on the server.
+func (m *PlayerModel) toggleFavouriteCmd(id string, favourite bool) tea.Cmd {
+	client := subsonicSession
+	return func() tea.Msg {
+		err := client.SetFavourite(id, favourite)
+		return favouriteMsg{id: id, favourite: favourite, err: err}
 	}
 }
 

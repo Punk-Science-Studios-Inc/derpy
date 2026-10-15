@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	tea "github.com/charmbracelet/bubbletea"
 	"io"
 	"strings"
 	"testing"
@@ -132,5 +133,33 @@ func TestLoadCurrentTrackResetsDisplayAndDropsStaleResults(t *testing.T) {
 	m.Update(trackLoadedMsg{seq: m.loadSeq, title: "fresh", album: "LP"})
 	if m.title != "fresh" || m.album != "LP" || m.loading {
 		t.Fatalf("current trackLoadedMsg not applied: title=%q loading=%v", m.title, m.loading)
+	}
+}
+
+func TestFavouriteKeyOnLocalTrack(t *testing.T) {
+	m := NewPlayerModel([]string{"/music/a.mp3"})
+	m.playing = true
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if cmd != nil || !strings.Contains(m.nostrStatus, "only available for Sonic") {
+		t.Fatalf("local track: cmd=%v status=%q", cmd != nil, m.nostrStatus)
+	}
+}
+
+func TestFavouriteMsgUpdatesCurrentTrackOnly(t *testing.T) {
+	m := NewPlayerModel([]string{subsonicPrefix + "a", subsonicPrefix + "b"})
+	m.Update(favouriteMsg{id: "a", favourite: true})
+	if !m.favourite || !strings.Contains(m.nostrStatus, "Added") {
+		t.Fatalf("current track: favourite=%v status=%q", m.favourite, m.nostrStatus)
+	}
+	if !strings.Contains(m.zenHome(""), "♥") {
+		t.Error("heart not shown for a favourite")
+	}
+
+	// A result for a track the user already skipped past must not mark the
+	// current one.
+	m.favourite = false
+	m.Update(favouriteMsg{id: "b", favourite: true})
+	if m.favourite {
+		t.Error("favouriteMsg for another track changed the current track")
 	}
 }

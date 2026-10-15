@@ -40,7 +40,7 @@ The core reads no config files. `configureCore()` in `config.go` pushes derpy's 
 | `listenbrainz.go` | Optional scrobbling — submits "playing now" immediately, scrobbles at 25% completion (min 30s tracks) |
 | `shuffle.go` | Fisher-Yates shuffle seeded with current time |
 | `subsonic.go` | Subsonic API client (token auth). Lists the library via paged `search3`, downloads each track to a session temp dir on demand, and prefetches the next server track in the background once the current one starts (one prefetch slot; a new one discards the old). Playlist entries for server tracks are `subsonic:<id>`; `AudioPlayer.LoadTrack` resolves them through the package-level `subsonicSession`. |
-| `sonic.go` | `derpy sonic` command — prompts for and saves server URL/user/password on first run, then plays the server library like a local directory. `[D]` is a no-op for server tracks. |
+| `sonic.go` | `derpy sonic` command — prompts for and saves server URL/user/password on first run, then plays the server library like a local directory. `[D]` is a no-op for server tracks. `--favourites` plays only favourites (`getStarred2`); `[F]` toggles the current server track via `star`/`unstar`. derpy says "favourite" and shows ♥ where Subsonic says "starred". |
 
 
 **Audio formats:** mp3, wav, flac, ogg, m4a, aac
@@ -48,7 +48,7 @@ The core reads no config files. `configureCore()` in `config.go` pushes derpy's 
 
 **TUI:** 100ms tick interval for progress updates. Position is calculated from elapsed wall-clock time with pause offset.
 
-**Keyboard controls:** `←`/`→` prev/next track, `SPACE` pause/resume, `[E]` earmark, `[C]` channels, `[P]` post, `[D]` delete, `ESC`/`q` quit.
+**Keyboard controls:** `←`/`→` prev/next track, `SPACE` pause/resume, `[E]` earmark, `[C]` channels, `[P]` post, `[D]` delete, `[F]` favourite (Sonic tracks), `ESC`/`q` quit.
 
 ### Channels
 

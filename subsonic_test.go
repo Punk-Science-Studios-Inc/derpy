@@ -25,6 +25,7 @@ type fakeSubsonic struct {
 	lastFormat     string            // format param of the last stream call
 	streamCalls    atomic.Int32      // number of stream requests served
 	gate           chan struct{}     // when set, stream blocks until it is closed
+	starCalls      []string          // "star:<id>" / "unstar:<id>" in call order
 }
 
 func (f *fakeSubsonic) handler(t *testing.T) http.Handler {
@@ -52,6 +53,17 @@ func (f *fakeSubsonic) handler(t *testing.T) http.Handler {
 				}
 			}
 			writeEnvelope(w, map[string]any{"status": "ok", "searchResult3": map[string]any{"song": page}})
+		case "/rest/star", "/rest/unstar":
+			f.starCalls = append(f.starCalls, strings.TrimPrefix(r.URL.Path, "/rest/")+":"+q.Get("id"))
+			writeEnvelope(w, map[string]any{"status": "ok"})
+		case "/rest/getStarred2":
+			var starred []subsonicSong
+			for _, s := range f.songs {
+				if s.Starred != "" {
+					starred = append(starred, s)
+				}
+			}
+			writeEnvelope(w, map[string]any{"status": "ok", "starred2": map[string]any{"song": starred}})
 		case "/rest/getRandomSongs":
 			writeEnvelope(w, map[string]any{"status": "ok", "randomSongs": map[string]any{"song": f.songs}})
 		case "/rest/stream":
@@ -301,5 +313,34 @@ func TestSubsonicFetchCancelledWhileWaitingOnPrefetch(t *testing.T) {
 	defer cancel()
 	if _, _, err := c.Fetch(ctx, "a"); err == nil {
 		t.Fatal("expected the wait to end with the context")
+	}
+}
+
+func TestSubsonicFavourites(t *testing.T) {
+	f := &fakeSubsonic{user: "u", password: "p", songs: []subsonicSong{
+		{ID: "a", Starred: "2026-10-01T00:00:00Z"},
+		{ID: "b"},
+	}}
+	c := newFakeClient(t, f)
+
+	favs, err := c.Favourites()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(favs) != 1 || favs[0].ID != "a" || !c.IsFavourite("a") || c.IsFavourite("b") {
+		t.Fatalf("favourites: %+v", favs)
+	}
+
+	if err := c.SetFavourite("b", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetFavourite("a", false); err != nil {
+		t.Fatal(err)
+	}
+	if !c.IsFavourite("b") || c.IsFavourite("a") {
+		t.Error("SetFavourite did not update local state")
+	}
+	if got := strings.Join(f.starCalls, ","); got != "star:b,unstar:a" {
+		t.Errorf("server calls: %s", got)
 	}
 }

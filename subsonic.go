@@ -53,6 +53,9 @@ type subsonicSong struct {
 	Album  string `json:"album"`
 	Suffix string `json:"suffix"`
 	Path   string `json:"path"`
+	// Starred is the time the song was favourited, empty when it isn't.
+	// Subsonic calls favourites "starred"; derpy calls them favourites.
+	Starred string `json:"starred"`
 }
 
 // matchText is the string keyword expressions are matched against. Servers
@@ -79,6 +82,9 @@ type subsonicResponse struct {
 		RandomSongs struct {
 			Song []subsonicSong `json:"song"`
 		} `json:"randomSongs"`
+		Starred2 struct {
+			Song []subsonicSong `json:"song"`
+		} `json:"starred2"`
 	} `json:"subsonic-response"`
 }
 
@@ -241,12 +247,60 @@ func (c *SubsonicClient) Songs(progress func(n int)) ([]subsonicSong, error) {
 		all = out.Response.RandomSongs.Song
 	}
 
+	c.remember(all)
+	return all, nil
+}
+
+// Favourites returns the user's favourite songs (starred, in Subsonic terms).
+func (c *SubsonicClient) Favourites() ([]subsonicSong, error) {
+	out, err := c.call("getStarred2", nil)
+	if err != nil {
+		return nil, err
+	}
+	songs := out.Response.Starred2.Song
+	c.remember(songs)
+	return songs, nil
+}
+
+// SetFavourite favourites (stars) or un-favourites (unstars) a song on the
+// server and records the new state locally so IsFavourite reflects it.
+func (c *SubsonicClient) SetFavourite(id string, favourite bool) error {
+	method := "unstar"
+	if favourite {
+		method = "star"
+	}
+	if _, err := c.call(method, url.Values{"id": {id}}); err != nil {
+		return err
+	}
 	c.mu.Lock()
-	for _, s := range all {
+	defer c.mu.Unlock()
+	s, ok := c.songs[id]
+	if !ok {
+		s = subsonicSong{ID: id}
+	}
+	s.Starred = ""
+	if favourite {
+		s.Starred = time.Now().UTC().Format(time.RFC3339)
+	}
+	c.songs[id] = s
+	return nil
+}
+
+// IsFavourite reports whether a song is a favourite, as of the last listing
+// or SetFavourite call.
+func (c *SubsonicClient) IsFavourite(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.songs[id].Starred != ""
+}
+
+// remember records song metadata for Fetch and IsFavourite.
+func (c *SubsonicClient) remember(songs []subsonicSong) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range songs {
 		c.songs[s.ID] = s
 	}
-	c.mu.Unlock()
-	return all, nil
 }
 
 // Prefetch starts downloading a song in the background so a later Fetch of

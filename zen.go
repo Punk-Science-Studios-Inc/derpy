@@ -153,7 +153,11 @@ func (m *PlayerModel) zenHome(hint string) string {
 	var lines []string
 	lines = append(lines, strings.TrimSpace(psStatus.Render("derpy")))
 	lines = append(lines, "")
-	lines = append(lines, strings.TrimSpace(psTrack.Render(m.zenTrackDisplay())))
+	hero := strings.TrimSpace(psTrack.Render(m.zenTrackDisplay()))
+	if m.favourite && !m.loading {
+		hero += " " + strings.TrimSpace(psProgress.Render("♥"))
+	}
+	lines = append(lines, hero)
 	if m.album != "" {
 		lines = append(lines, strings.TrimSpace(psAlbum.Render(m.album)))
 	}
@@ -179,6 +183,7 @@ func zenHelpRows() []string {
 		"p            post to nostr + bluesky",
 
 		"d            delete file from disk",
+		"f            favourite (Sonic tracks)",
 		"? / esc      close this card",
 		"q            quit",
 	}
