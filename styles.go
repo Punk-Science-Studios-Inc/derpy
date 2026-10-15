@@ -35,6 +35,11 @@ var (
 		Foreground(lipgloss.Color("#3A3A3A")). // PS Dark Grey
 		MarginBottom(1)
 
+	// psAlbum — PS Olive: the album under the track line. Readable but a
+	// step behind the Cream hero; Dark Grey was too faint to notice.
+	psAlbum = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#7A8800")) // PS Olive
+
 	// psProgress — PS Lime: active progress bar fill.
 	psProgress = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#C8DF00")) // PS Lime

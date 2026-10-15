@@ -46,6 +46,12 @@ type Config struct {
 	// file uploads and downloads. When empty, core.DefaultBlossomServers() in
 	// blossom.go is used.
 	BlossomServers []string `json:"blossom_servers,omitempty"`
+	// SubsonicServer, SubsonicUser and SubsonicPassword are the server the
+	// 'sonic' command plays from. The password is kept in plain text because
+	// Subsonic token auth hashes it with a fresh salt on every request.
+	SubsonicServer   string `json:"subsonic_server,omitempty"`
+	SubsonicUser     string `json:"subsonic_user,omitempty"`
+	SubsonicPassword string `json:"subsonic_password,omitempty"`
 }
 
 // configureCore pushes derpy's persisted config into earmark-core. The core

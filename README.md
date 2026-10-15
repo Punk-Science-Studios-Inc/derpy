@@ -17,8 +17,9 @@ Earmarks expire after 30 days. This is intentional. The list isn't a permanent a
 - Filter playback by keyword expression: `derpy jazz AND piano`, `derpy "blue note" OR prestige`
 - `[E]` earmarks the current track — encrypts it, uploads it to Blossom servers, and saves the manifest to a private Nostr list that follows you across devices. If you are in any channels, `[E]` opens a target picker: personal and each channel are toggles, so a track can go to your personal list, to channels, or both.
 - `[C]` browses your channels — tracks friends have shared with you, playable inline
-- `[P]` publishes a public Nostr note about what you're listening to, with a Bandcamp or YouTube link if one can be found
+- `[P]` publishes a public Nostr note and a Bluesky note about what you're listening to, with a Bandcamp or YouTube link if one can be found
 - `[D]` deletes the current file from disk
+- `derpy sonic` shuffles and plays the library of a Subsonic-compatible server (Navidrome, Gonic, Airsonic) instead of a local directory
 - `derpy earmarks` plays your earmarked tracks as a playlist — using the local file if it exists, downloading and decrypting from Blossom if not
 - Earmarks older than 30 days are automatically purged on startup, along with their uploaded audio chunks
 
@@ -97,6 +98,12 @@ derpy
 derpy jazz AND piano
 derpy "kind of blue" OR "a love supreme"
 derpy (jazz OR blues) AND live
+
+# Play from a Subsonic server. The first run asks for the URL, username and
+# password, checks them, and saves them for later runs.
+derpy sonic
+derpy sonic jazz AND piano
+derpy sonic --server https://music.example.com --user me   # switch server/account
 
 # Play your earmarked tracks
 derpy earmarks

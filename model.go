@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -65,6 +66,15 @@ type PlayerModel struct {
 	// unmounted), which is treated as fatal rather than looping forever.
 	loadFailures int
 
+	// Track-load state. Each loadCurrentTrack call bumps loadSeq and cancels
+	// the previous load, so skipping during a slow Subsonic download abandons
+	// it rather than queueing behind it. loadMu keeps two loads from driving
+	// the player at once; trackLoadedMsg results from older loads are dropped.
+	loading    bool
+	loadSeq    int
+	loadCancel context.CancelFunc
+	loadMu     sync.Mutex
+
 	// help shows the Zen keys card. It carries key discoverability so the
 	// home hint can stay minimal; esc/? dismisses it, and any other key
 	// dismisses it first and then processes normally.
@@ -78,6 +88,7 @@ type positionMsg time.Duration
 type trackEndedMsg struct{}
 type playErrorMsg error
 type trackLoadedMsg struct {
+	seq      int // loadSeq of the load that produced this; stale ones are ignored
 	duration time.Duration
 	artist   string
 	title    string
@@ -423,6 +434,11 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			// Delete current track from disk and advance to next
 			if m.playing && m.currentIndex < len(m.playlist) {
+				// Subsonic has no delete API, and the server copy is not ours to remove.
+				if _, remote := subsonicEntryID(m.playlist[m.currentIndex]); remote {
+					m.nostrStatus = "Delete is not available for Subsonic tracks"
+					return m, nil
+				}
 				return m, m.deleteCurrentTrack()
 			}
 		}
@@ -439,7 +455,7 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.paused = false
 			m.mpris.NotifyStateChanged(m)
 			return m, m.tickCmd()
-		} else if !m.playing {
+		} else if !m.playing && !m.loading {
 			// Nothing loaded yet — load and play.
 			return m, m.loadCurrentTrack()
 		}
@@ -549,6 +565,10 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadCurrentTrack()
 
 	case trackLoadedMsg:
+		if msg.seq != m.loadSeq {
+			return m, nil // superseded by a later skip
+		}
+		m.loading = false
 		m.loadFailures = 0 // A track loaded — reset the consecutive-failure guard.
 		m.playing = true
 		m.paused = false
@@ -560,6 +580,11 @@ func (m *PlayerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Notify MPRIS clients that metadata and status have changed.
 		m.mpris.NotifyStateChanged(m)
 		m.mpris.EmitSeeked(m) // Position jumped to 0 on track change.
+		// Start downloading the next Subsonic track now, so skipping to it
+		// or reaching it naturally doesn't wait on the server.
+		if len(m.playlist) > 1 {
+			prefetchEntry(m.playlist[(m.currentIndex+1)%len(m.playlist)])
+		}
 		// Restart the tick cycle for position updates
 		return m, m.tickCmd()
 
@@ -711,18 +736,45 @@ func (m *PlayerModel) tickCmd() tea.Cmd {
 }
 
 // loadCurrentTrack loads and plays the current track.
+//
+// It runs on the Update goroutine, so it also resets the display: the old
+// track's details are cleared and m.loading is set until trackLoadedMsg
+// arrives, which is what lets a slow Subsonic download show a waiting
+// message instead of the previous song.
 func (m *PlayerModel) loadCurrentTrack() tea.Cmd {
+	if m.currentIndex >= len(m.playlist) {
+		return nil
+	}
+	track := m.playlist[m.currentIndex]
+
+	if m.loadCancel != nil {
+		m.loadCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.loadCancel = cancel
+	m.loadSeq++
+	seq := m.loadSeq
+
+	m.loading = true
+	m.playing = false
+	m.paused = false
+	m.position = 0
+	m.duration = 0
+	m.artist, m.title, m.album = "", "", ""
+
 	return func() tea.Msg {
-		if m.currentIndex >= len(m.playlist) {
-			return nil
+		m.loadMu.Lock()
+		defer m.loadMu.Unlock()
+		if ctx.Err() != nil {
+			return nil // skipped before this load started
 		}
-
-		track := m.playlist[m.currentIndex]
-
 
 		// Load the track. Include the track path so a fatal decode/load
 		// error tells the user which file was playing when it crashed.
-		if err := m.player.LoadTrack(track); err != nil {
+		if err := m.player.LoadTrackContext(ctx, track); err != nil {
+			if ctx.Err() != nil {
+				return nil // skipped mid-download; not a failure
+			}
 			return playErrorMsg(fmt.Errorf("failed to load track %q: %w", track, err))
 		}
 
@@ -732,6 +784,7 @@ func (m *PlayerModel) loadCurrentTrack() tea.Cmd {
 		}
 
 		return trackLoadedMsg{
+			seq:      seq,
 			duration: m.player.GetDuration(),
 			artist:   m.player.GetArtist(),
 			title:    m.player.GetTitle(),
@@ -843,6 +896,9 @@ func renderSocialStatus(msg socialPublishMsg) string {
 func (m *PlayerModel) saveEarmarkCmd(hexKey string, keepPersonal bool, channelTargets []string) tea.Cmd {
 	artist, title, album := m.artist, m.title, m.album
 	path := m.playlist[m.currentIndex]
+	// The file to encrypt. For Subsonic tracks this is the downloaded copy;
+	// path stays the "subsonic:" entry so the earmark never names a temp file.
+	local := m.player.LocalPath()
 
 	return func() tea.Msg {
 		// Step 1: duplicate check before any work. The local queue is the
@@ -857,7 +913,7 @@ func (m *PlayerModel) saveEarmarkCmd(hexKey string, keepPersonal bool, channelTa
 		}
 
 		// Step 2: encrypt locally — gives us all chunk SHA-256s immediately.
-		prepared, manifest, err := core.PrepareUpload(path)
+		prepared, manifest, err := core.PrepareUpload(local)
 		if err != nil {
 			return nostrPublishedMsg{action: "earmark", err: fmt.Errorf("could not encrypt file: %w", err)}
 		}
@@ -1018,6 +1074,7 @@ func (m *PlayerModel) saveKeyAndPublish(rawKey string) tea.Cmd {
 func (m *PlayerModel) saveKeyAndAddEarmark(rawKey string) tea.Cmd {
 	artist, title, album := m.artist, m.title, m.album
 	path := m.playlist[m.currentIndex]
+	local := m.player.LocalPath()
 	return func() tea.Msg {
 		rawKey = strings.TrimSpace(rawKey)
 		if rawKey == "" {
@@ -1044,7 +1101,7 @@ func (m *PlayerModel) saveKeyAndAddEarmark(rawKey string) tea.Cmd {
 		}
 
 		// Encrypt → upload → earmark (same sequence as saveEarmarkCmd).
-		prepared, manifest, err := core.PrepareUpload(path)
+		prepared, manifest, err := core.PrepareUpload(local)
 		if err != nil {
 			return nostrPublishedMsg{action: "earmark", err: fmt.Errorf("could not encrypt file: %w", err)}
 		}

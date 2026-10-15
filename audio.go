@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -73,6 +74,8 @@ type AudioPlayer struct {
 	format             beep.Format
 	playing            bool
 	file               *os.File
+	localPath          string // file actually decoded; differs from the playlist entry for Subsonic tracks
+	remoteFile         string // downloaded Subsonic track, deleted when the next track loads
 	duration           time.Duration
 	currentPos         time.Duration
 	artist             string
@@ -124,11 +127,45 @@ func isReadFailure(err error) bool {
 
 // LoadTrack loads an audio file for playback
 func (ap *AudioPlayer) LoadTrack(filePath string) error {
+	return ap.LoadTrackContext(context.Background(), filePath)
+}
+
+// LoadTrackContext is LoadTrack with a context that abandons a Subsonic
+// download when cancelled, e.g. because the user skipped to another track.
+func (ap *AudioPlayer) LoadTrackContext(ctx context.Context, filePath string) error {
 	// Stop any current playback and reset state
 	ap.Stop()
 
 	// Wait a moment for resources to be fully released
 	time.Sleep(50 * time.Millisecond)
+
+	// The previous Subsonic download is no longer needed.
+	if ap.remoteFile != "" {
+		os.Remove(ap.remoteFile)
+		ap.remoteFile = ""
+	}
+
+	// Subsonic entries are downloaded first and then decoded like any local
+	// file. Server metadata replaces the tags when present, since a
+	// transcoded stream may carry none.
+	var remote *subsonicSong
+	if id, ok := subsonicEntryID(filePath); ok {
+		if subsonicSession == nil {
+			return fmt.Errorf("no Subsonic server connected for %s", filePath)
+		}
+		local, song, err := subsonicSession.Fetch(ctx, id)
+		if err != nil {
+			return fmt.Errorf("failed to download %s: %w", filePath, err)
+		}
+		if err := ctx.Err(); err != nil {
+			os.Remove(local)
+			return err
+		}
+		ap.remoteFile = local
+		remote = &song
+		filePath = local
+	}
+	ap.localPath = filePath
 
 	// Open the audio file
 	file, err := os.Open(filePath)
@@ -149,6 +186,17 @@ func (ap *AudioPlayer) LoadTrack(filePath string) error {
 		ap.title = filepath.Base(filePath)
 		ap.artist = "Unknown Artist"
 		ap.album = "Unknown Album"
+	}
+	if remote != nil {
+		if remote.Title != "" {
+			ap.title = remote.Title
+		}
+		if remote.Artist != "" {
+			ap.artist = remote.Artist
+		}
+		if remote.Album != "" {
+			ap.album = remote.Album
+		}
 	}
 
 	// Reset file pointer for audio decoding
@@ -437,6 +485,12 @@ func (ap *AudioPlayer) ctrlPaused() bool {
 // IsPlaying returns true if audio is currently playing
 func (ap *AudioPlayer) IsPlaying() bool {
 	return ap.playing && !ap.IsPaused()
+}
+
+// LocalPath returns the on-disk file of the loaded track. For Subsonic tracks
+// this is the downloaded copy, not the playlist entry.
+func (ap *AudioPlayer) LocalPath() string {
+	return ap.localPath
 }
 
 // GetArtist returns the artist of the current track

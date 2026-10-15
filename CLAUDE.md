@@ -39,6 +39,8 @@ The core reads no config files. `configureCore()` in `config.go` pushes derpy's 
 | `mpris.go` / `mpris_windows.go` / `mpris_darwin.go` | OS media-control integration behind one `MPRISService` API (build-tagged per OS). Linux = MPRIS2 D-Bus (`mpris.go`); Windows = System Media Transport Controls via a WinRT MediaPlayer-owned SMTC (`mpris_windows.go`); macOS = no-op stub. `mpris_types.go` holds the platform-neutral `mprisXxxMsg` command messages consumed by `model.go`. |
 | `listenbrainz.go` | Optional scrobbling — submits "playing now" immediately, scrobbles at 25% completion (min 30s tracks) |
 | `shuffle.go` | Fisher-Yates shuffle seeded with current time |
+| `subsonic.go` | Subsonic API client (token auth). Lists the library via paged `search3`, downloads each track to a session temp dir on demand, and prefetches the next server track in the background once the current one starts (one prefetch slot; a new one discards the old). Playlist entries for server tracks are `subsonic:<id>`; `AudioPlayer.LoadTrack` resolves them through the package-level `subsonicSession`. |
+| `sonic.go` | `derpy sonic` command — prompts for and saves server URL/user/password on first run, then plays the server library like a local directory. `[D]` is a no-op for server tracks. |
 
 
 **Audio formats:** mp3, wav, flac, ogg, m4a, aac

@@ -139,6 +139,7 @@ Matching is case-insensitive against the full file path.`,
 	cmd.AddCommand(relayCmd())
 	cmd.AddCommand(blossomCmd())
 	cmd.AddCommand(earmarksCmd())
+	cmd.AddCommand(sonicCmd())
 
 	return cmd
 }
@@ -337,7 +338,7 @@ func runNoTUI(playlist []string) error {
 	player := NewAudioPlayer()
 	defer player.Shutdown()
 
-	for _, track := range playlist {
+	for i, track := range playlist {
 		fmt.Printf("Playing: %s\n", track)
 
 		if err := player.LoadTrack(track); err != nil {
@@ -349,6 +350,9 @@ func runNoTUI(playlist []string) error {
 			fmt.Fprintf(os.Stderr, "Error playing track %s: %v\n", track, err)
 			_ = logTrackError(fmt.Errorf("failed to play track %q: %w", track, err))
 			continue
+		}
+		if i+1 < len(playlist) {
+			prefetchEntry(playlist[i+1])
 		}
 
 		for !player.HasEnded() {

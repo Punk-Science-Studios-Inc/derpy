@@ -28,13 +28,21 @@ const (
 )
 
 // zenTrackDisplay renders "Artist — Title", falling back to the bare
-// filename when embedded metadata is missing.
+// filename when embedded metadata is missing. A Subsonic track that is still
+// downloading shows a waiting message instead of its opaque "subsonic:" id.
 func (m *PlayerModel) zenTrackDisplay() string {
+	_, remote := subsonicEntryID(m.playlist[m.currentIndex])
+	if m.loading && remote {
+		return "Waiting for Sonic server..."
+	}
 	if m.title != "" && m.artist != "" {
 		return fmt.Sprintf("%s — %s", m.artist, m.title)
 	}
 	if m.title != "" {
 		return m.title
+	}
+	if remote {
+		return "Unknown track"
 	}
 	trackDisplay := filepath.Base(m.playlist[m.currentIndex])
 	if ext := filepath.Ext(trackDisplay); ext != "" {
@@ -147,7 +155,7 @@ func (m *PlayerModel) zenHome(hint string) string {
 	lines = append(lines, "")
 	lines = append(lines, strings.TrimSpace(psTrack.Render(m.zenTrackDisplay())))
 	if m.album != "" {
-		lines = append(lines, strings.TrimSpace(psStatus.Render(m.album)))
+		lines = append(lines, strings.TrimSpace(psAlbum.Render(m.album)))
 	}
 	lines = append(lines, "")
 	lines = append(lines, m.zenProgressLine())
